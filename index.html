@@ -3,83 +3,161 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Safe GLB Viewer (Quest WebXR)</title>
-  <!-- Pin a stable model-viewer -->
-  <script type="module" src="https://unpkg.com/@google/model-viewer@3.3.0/dist/model-viewer.min.js"></script>
+  <title>Quest MR Grabbable Viewer (A‑Frame)</title>
+  <!-- A-Frame (stable) -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <style>
-    html,body{margin:0;height:100%;background:#0b1020;color:#e5e7eb;font:16px/1.3 system-ui,Segoe UI,Roboto}
-    header{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.6rem;background:#111827;position:sticky;top:0;z-index:10}
+    :root{--bg:#0b1020;--panel:#111827;--muted:#94a3b8;--accent:#38bdf8}
+    html,body{height:100%;margin:0;background:var(--bg);color:#e5e7eb;font:16px/1.35 system-ui,Segoe UI,Roboto}
+    #hud{position:fixed;inset:0;pointer-events:none}
+    header{pointer-events:auto;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.6rem;background:var(--panel);}
     input[type=url]{flex:1;min-width:320px;padding:.45rem .6rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb}
-    button{padding:.5rem .8rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb;cursor:pointer}
-    button.primary{background:#38bdf8;color:#001421;border-color:#0ea5e9}
-    #status{padding:.4rem .6rem;color:#94a3b8;font-size:.9rem}
-    #status.error{color:#fecaca}
-    model-viewer{width:100%;height:calc(100% - 92px);display:block;background:#0a0f1f}
+    button{pointer-events:auto;cursor:pointer;padding:.5rem .8rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb}
+    .primary{background:var(--accent);color:#001421;border-color:#0ea5e9}
+    #status{pointer-events:auto;padding:.4rem .6rem;color:var(--muted);font-size:.9rem}
+    #scaleBox{display:flex;align-items:center;gap:.5rem}
+    #scaleBox input[type=range]{width:160px}
   </style>
 </head>
 <body>
-  <header>
-    <input id="src" type="url" placeholder="models/your.glb or https://example.com/file.glb" />
-    <button id="load">Load</button>
-    <button id="ar" class="primary">Enter MR (passthrough)</button>
-    <button data-demo="astro">Astronaut</button>
-    <button data-demo="robot">Robot</button>
-    <button data-demo="duck">Duck</button>
-    <button data-demo="bottle">Bottle</button>
-  </header>
+  <!-- Overlay UI lives outside the WebGL canvas so it works in-headset -->
+  <div id="hud">
+    <header>
+      <input id="src" type="url" placeholder="models/your.glb or https://…/file.glb" />
+      <button id="load">Load</button>
+      <button id="enter" class="primary">Enter MR</button>
+      <button id="place">Place on reticle</button>
+      <button id="recenter">Recenter near me</button>
+      <div id="scaleBox">
+        <label>Scale</label>
+        <input id="scale" type="range" min="0.05" max="5" step="0.05" value="1" />
+        <input id="scaleNum" type="number" min="0.05" max="5" step="0.05" value="1" style="width:64px;padding:.35rem .4rem;border-radius:.4rem;border:1px solid #233;background:#0d1326;color:#e5e7eb;" />
+      </div>
+    </header>
+    <div id="status">Ready.</div>
+  </div>
 
-  <div id="status">Ready.</div>
+  <!-- A‑Frame scene in AR mode with hit‑test + hand tracking optional -->
+  <a-scene renderer="colorManagement:true; physicallyCorrectLights:true"
+           webxr="mode: ar; optionalFeatures: hit-test,anchors,local-floor,hand-tracking; overlayElement:#hud"
+           xr-mode-ui="enabled: false" embedded>
 
-  <model-viewer id="mv"
-    src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/DamagedHelmet/glTF-Binary/DamagedHelmet.glb"
-    ar ar-modes="webxr" camera-controls touch-action="pan-y"
-    crossorigin="anonymous">
-  </model-viewer>
+    <!-- Light for desktop preview (has no effect on passthrough) -->
+    <a-entity light="type: directional; intensity: 1" position="1 2 1"></a-entity>
+    <a-entity light="type: ambient; intensity: 0.6"></a-entity>
+
+    <!-- Camera rig (device controls camera in AR) -->
+    <a-entity id="rig">
+      <a-camera id="camera" wasd-controls-enabled="false"></a-camera>
+      <!-- Right controller for ray + grab -->
+      <a-entity id="right" laser-controls="hand: right"
+                raycaster="objects: .interactive; showLine: true; lineColor: #3cf"
+                grabber>
+      </a-entity>
+      <!-- Left controller (also grabs) -->
+      <a-entity id="left" laser-controls="hand: left"
+                raycaster="objects: .interactive; showLine: false"
+                grabber>
+      </a-entity>
+    </a-entity>
+
+    <!-- Reticle driven by WebXR hit‑test -->
+    <a-entity id="reticle" ar-hit-test visible="false"
+              geometry="primitive: ring; radiusInner: 0.06; radiusOuter: 0.075"
+              material="color: #3cf; shader: flat; opacity: .9"
+              rotation="-90 0 0"></a-entity>
+
+    <!-- Model container we move/scale/rotate; class=interactive so it can be grabbed -->
+    <a-entity id="model" class="interactive" visible="false"></a-entity>
+
+  </a-scene>
 
   <script>
-    const mv = document.getElementById('mv');
-    const input = document.getElementById('src');
-    const loadBtn = document.getElementById('load');
-    const arBtn = document.getElementById('ar');
-    const status = document.getElementById('status');
+  // ---------- helpers ----------
+  const $ = (s)=>document.querySelector(s);
+  const scene = document.querySelector('a-scene');
+  const model = $('#model');
+  const reticle = $('#reticle');
+  const camera = $('#camera');
+  const statusEl = $('#status');
+  const scaleSlider = $('#scale');
+  const scaleNum = $('#scaleNum');
 
-    function sameOrigin(u){
-      try{const x=new URL(u,location.origin);return x.origin===location.origin;}catch{return false;}
-    }
-    function loadModel(url) {
-      if (!url) return;
-      const abs = new URL(url, location.href).href;
-      const use = sameOrigin(abs) ? (abs + (abs.includes('?') ? '&' : '?') + 'v=' + Date.now()) : abs;
-      mv.setAttribute('src', use);
-      status.className=''; status.textContent = 'Loading: ' + abs;
-    }
+  function setStatus(msg, isError=false){ statusEl.textContent = msg; statusEl.style.color = isError? '#fecaca' : '#94a3b8'; }
 
-    loadBtn.addEventListener('click', () => loadModel(input.value.trim()));
+  function setScale(v){ v=Math.max(0.05,Math.min(5,Number(v)||1)); model.setAttribute('scale', `${v} ${v} ${v}`); scaleSlider.value=v; scaleNum.value=v; }
 
-    const demos = {
-      astro:  'https://modelviewer.dev/shared-assets/models/Astronaut.glb',
-      robot:  'https://modelviewer.dev/shared-assets/models/RobotExpressive.glb',
-      duck:   'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Duck/glTF-Binary/Duck.glb',
-      bottle: 'https://modelviewer.dev/shared-assets/models/WaterBottle.glb'
-    };
-    document.querySelectorAll('[data-demo]').forEach(b =>
-      b.addEventListener('click', () => {
-        const url = demos[b.dataset.demo];
-        input.value = url;
-        loadModel(url);
-      })
-    );
+  async function loadModel(url){
+    if(!url) return;
+    try{
+      const abs = new URL(url, location.href).href; // support relative paths
+      setStatus('Loading: '+abs);
+      // Remove previous child if any
+      const old = model.querySelector('a-asset-item, a-entity[gltf-model]');
+      if (old) old.remove();
+      model.setAttribute('gltf-model', abs);
+      model.setAttribute('visible','true');
+      model.addEventListener('model-loaded', ()=> setStatus('Loaded: '+abs), {once:true});
+      model.addEventListener('model-error', (e)=> setStatus('Error: '+(e?.detail||'model error'), true), {once:true});
+    }catch(err){ setStatus('Bad URL', true); }
+  }
 
-    mv.addEventListener('load', () => { status.className=''; status.textContent = 'Loaded: ' + mv.src; });
-    mv.addEventListener('error', (e) => {
-      status.className='error';
-      const msg = e?.detail?.message || e?.message || 'Unknown error';
-      status.textContent = 'Error loading model: ' + msg;
-      console.error('Model load error:', e);
-    });
+  // ---------- UI wiring ----------
+  $('#load').addEventListener('click', ()=> loadModel($('#src').value.trim()));
+  $('#enter').addEventListener('click', ()=> scene.enterVR());
+  $('#place').addEventListener('click', ()=> placeOnReticle());
+  $('#recenter').addEventListener('click', ()=> recenter());
+  scaleSlider.addEventListener('input', ()=> setScale(scaleSlider.value));
+  scaleNum.addEventListener('input', ()=> setScale(scaleNum.value));
 
-    const p = new URLSearchParams(location.search).get('src');
-    if (p) { input.value = p; loadModel(p); }
+  // Load via ?src=
+  const qs = new URLSearchParams(location.search).get('src');
+  if (qs) { $('#src').value = qs; loadModel(qs); }
+  setScale(1);
+
+  // ---------- placement ----------
+  function placeOnReticle(){
+    if (!reticle.getAttribute('visible')) { setStatus('No plane found — look at a lit floor.', true); return; }
+    const p = reticle.object3D.position; const q = reticle.object3D.quaternion;
+    model.object3D.position.copy(p); model.object3D.quaternion.copy(q);
+    setStatus('Placed on reticle');
+  }
+  function recenter(){
+    // 1m in front of the camera
+    const dir = new THREE.Vector3(0,0,-1); camera.object3D.getWorldDirection(dir);
+    const camPos = new THREE.Vector3(); camera.object3D.getWorldPosition(camPos);
+    const target = camPos.clone().add(dir.multiplyScalar(1.0));
+    model.object3D.position.copy(target);
+    model.object3D.quaternion.copy(camera.object3D.quaternion);
+    setStatus('Recentered near camera');
+  }
+
+  // ---------- components ----------
+  // WebXR hit‑test reticle
+  AFRAME.registerComponent('ar-hit-test',{
+    init(){ this.viewerSpace=null; this.hitTestSource=null; this.refSpace=null; this.onSession=this.onSession.bind(this); this.onEnd=this.onEnd.bind(this); this.el.sceneEl.renderer.xr.addEventListener('sessionstart', this.onSession); this.el.sceneEl.renderer.xr.addEventListener('sessionend', this.onEnd); },
+    onSession(){ const xr=this.el.sceneEl.renderer.xr; const session=xr.getSession(); if(!session) return; session.requestReferenceSpace('viewer').then((space)=>{ this.viewerSpace=space; }); xr.getReferenceSpace && (this.refSpace=xr.getReferenceSpace()); session.requestReferenceSpace('local-floor').then(rs=>{ this.refSpace=rs; }); session.requestHitTestSource && session.requestHitTestSource({space:this.viewerSpace}).then(src=>{ this.hitTestSource=src; }); },
+    onEnd(){ this.viewerSpace=null; if(this.hitTestSource){ this.hitTestSource.cancel && this.hitTestSource.cancel(); this.hitTestSource=null; } },
+    tick(){ const xr=this.el.sceneEl.renderer.xr; const session=xr.getSession(); if(!session||!this.hitTestSource||!this.refSpace) { this.el.setAttribute('visible','false'); return; } const frame=xr.getFrame(); const hits=frame.getHitTestResults(this.hitTestSource); if(hits && hits.length){ const pose=hits[0].getPose(this.refSpace); const m=this.el.object3D; m.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z); m.quaternion.set(pose.transform.orientation.x, pose.transform.orientation.y, pose.transform.orientation.z, pose.transform.orientation.w); this.el.setAttribute('visible','true'); } else { this.el.setAttribute('visible','false'); } }
+  });
+
+  // Controller-based grab
+  AFRAME.registerComponent('grabber',{
+    init(){ this.grabbed=null; this.offset=new THREE.Matrix4(); this.tmpMat=new THREE.Matrix4(); this.tmpVec=new THREE.Vector3(); this.tmpQuat=new THREE.Quaternion(); this.el.addEventListener('selectstart', e=>this.tryGrab()); this.el.addEventListener('selectend', e=>this.release()); },
+    raycastHit(){ const rc=this.el.components.raycaster; if(!rc||!rc.intersections.length) return null; // nearest hit
+      return rc.intersections[0]?.object?.el || null; },
+    tryGrab(){ const hit=this.raycastHit(); if(!hit) return; if(!hit.classList.contains('interactive')) return; this.grabbed=hit; // compute controller->object offset
+      const ctrl = this.el.object3D; const obj = hit.object3D; const invCtrl = new THREE.Matrix4().copy(ctrl.matrixWorld).invert(); this.offset.copy(invCtrl).multiply(obj.matrixWorld); },
+    release(){ this.grabbed=null; },
+    tick(){ if(!this.grabbed) return; // follow controller with maintained offset
+      const ctrl = this.el.object3D; this.tmpMat.copy(ctrl.matrixWorld).multiply(this.offset); this.tmpMat.decompose(this.grabbed.object3D.position, this.grabbed.object3D.quaternion, this.grabbed.object3D.scale); }
+  });
+
+  // Desktop preview convenience: click to load default sample
+  if (!qs && !$('#src').value) {
+    $('#src').value = 'https://modelviewer.dev/shared-assets/models/Astronaut.glb';
+    loadModel($('#src').value);
+  }
   </script>
 </body>
 </html>
