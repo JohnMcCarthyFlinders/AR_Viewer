@@ -3,211 +3,121 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Advanced MR Viewer (Quest) — Grab + (VR) Teleport</title>
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/aframe-teleport-controls@0.3.3/dist/aframe-teleport-controls.min.js"></script>
+  <title>Quest MR GLB Viewer (WebXR)</title>
+  <!-- Model Viewer web component -->
+  <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
   <style>
-    :root{--bg:#0b1020;--panel:#111827;--muted:#94a3b8;--accent:#38bdf8}
-    html,body{height:100%;margin:0;background:var(--bg);color:#e5e7eb;font:16px/1.35 system-ui,Segoe UI,Roboto}
-    header{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.6rem;background:var(--panel);position:sticky;top:0;z-index:10}
-    select,input,button{padding:.5rem .8rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb}
-    button{cursor:pointer}
-    #status{padding:.4rem .6rem;color:var(--muted);font-size:.9rem}
-    .grow{flex:1;min-width:280px}
-    a-scene{height:calc(100% - 96px)}
+    :root { --ui: #0f172a; --bg: #0b1020; --muted: #94a3b8; --accent: #38bdf8; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: #e5e7eb; font: 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; }
+    header { display: grid; gap: .5rem; grid-template-columns: 1fr auto auto; align-items: center; padding: .75rem; background: rgba(15, 23, 42, .9); position: sticky; top: 0; backdrop-filter: blur(6px); z-index: 10; }
+    header input[type=url] { width: 100%; padding: .6rem .7rem; border-radius: .6rem; border: 1px solid #233; background: #0d1326; color: #e5e7eb; outline: none; }
+    header button { cursor: pointer; padding: .6rem .9rem; margin-left: .5rem; border-radius: .6rem; border: 1px solid #233; background: #0d1326; color: #e5e7eb; font-weight: 600; }
+    header button.primary { background: var(--accent); color: #001421; border-color: #0ea5e9; }
+    header a { color: var(--muted); text-decoration: none; font-size: .9rem; margin-left: .75rem; }
+    model-viewer { width: 100%; height: calc(100% - 72px); display: block; background: #0a0f1f; }
+    footer { position: fixed; right: .75rem; bottom: .75rem; color: var(--muted); font-size: .85rem; opacity: .8; }
+    .hint { color: var(--muted); font-size: .9rem; padding: 0 .75rem .5rem; }
+    .error { color: #fecaca; }
   </style>
 </head>
 <body>
   <header>
-    <select id="modelList" class="grow"><option>Loading models/ …</option></select>
-    <button id="refresh">Refresh</button>
-    <span>or</span>
-    <input id="manual" class="grow" placeholder="manual URL e.g. models/your.glb" />
-    <button id="loadManual">Load</button>
-    <button id="enter" style="background:#38bdf8;color:#001421;border-color:#0ea5e9">Enter MR</button>
-    <button id="place">Place</button>
-    <button id="here">Here</button>
-    <button id="smaller">−</button>
-    <button id="bigger">+</button>
+    <input id="src" type="url" placeholder="Paste a direct .glb URL (https://...) and press Load" />
+    <button id="load">Load</button>
+    <button id="enterAr" class="primary">Enter MR (passthrough)</button>
   </header>
-  <div id="status">Ready. Pick from the dropdown (reads <code>models/manifest.json</code> if present; otherwise uses GitHub API). Selecting a model auto‑loads it.</div>
 
-  <a-scene renderer="colorManagement:true; physicallyCorrectLights:true"
-           webxr="mode: ar; optionalFeatures: hit-test,anchors,local-floor,hand-tracking"
-           xr-mode-ui="enabled: false" embedded>
+  <div class="hint" id="status">Paste a GLB URL or use the default below. On Quest, tap <em>Enter MR</em> to switch to passthrough.</div>
 
-    <a-entity light="type: directional; intensity: 1" position="1 2 1"></a-entity>
-    <a-entity light="type: ambient; intensity: 0.6"></a-entity>
+  <!--
+    model-viewer flags
+      - ar + ar-modes="webxr" requests WebXR immersive-ar on Quest
+      - ar-scale="fixed" preserves real-world scale (1 unit = 1 meter)
+      - ar-placement="floor" prefers ground placement when supported
+      - camera-controls allows orbiting in non-AR preview
+  -->
+  <model-viewer id="mv"
+    src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/DamagedHelmet/glTF-Binary/DamagedHelmet.glb"
+    ar
+    ar-modes="webxr"
+    ar-scale="fixed"
+    ar-placement="floor"
+    camera-controls
+    touch-action="pan-y"
+    shadow-intensity="1"
+    exposure="1.0"
+    environment-image="">
+    
+    <!-- Optional: custom AR button slot (hidden; we use our header button) -->
+    <button slot="ar-button" style="display:none">View in your space</button>
+  </model-viewer>
 
-    <a-entity id="rig">
-      <a-camera id="camera" wasd-controls-enabled="false"></a-camera>
-      <a-entity id="right" laser-controls="hand: right"
-                raycaster="objects: .interactive; showLine: true; lineColor: #3cf"
-                cursor="rayOrigin: entity; fuse: false"
-                grabber teleport-vr></a-entity>
-      <a-entity id="left" laser-controls="hand: left"
-                raycaster="objects: .interactive; showLine: false"
-                cursor="rayOrigin: entity; fuse: false"
-                grabber teleport-vr></a-entity>
-    </a-entity>
-
-    <a-entity id="reticle" ar-hit-test visible="false"
-              geometry="primitive: ring; radiusInner: 0.06; radiusOuter: 0.075"
-              material="color: #3cf; shader: flat; opacity: .9"
-              rotation="-90 0 0"></a-entity>
-
-    <a-entity id="model" class="interactive" visible="false"></a-entity>
-
-    <a-entity id="ground" vr-only geometry="primitive: circle; radius: 4" material="color: #1f2937; opacity: 0.25" rotation="-90 0 0" position="0 0 -1"></a-entity>
-  </a-scene>
+  <footer>
+    <span id="support"></span>
+  </footer>
 
   <script>
-  const $ = (s)=>document.querySelector(s);
-  const statusEl = $('#status');
-  const model = $('#model');
-  const reticle = $('#reticle');
-  const sceneEl = document.querySelector('a-scene');
-  const cam = document.getElementById('camera');
+    const mv = document.getElementById('mv');
+    const input = document.getElementById('src');
+    const loadBtn = document.getElementById('load');
+    const enterBtn = document.getElementById('enterAr');
+    const status = document.getElementById('status');
+    const support = document.getElementById('support');
 
-  function setStatus(msg, err=false){ statusEl.textContent=msg; statusEl.style.color=err?'#fecaca':'#94a3b8'; }
-  function setScale(v){ v=Math.max(0.05,Math.min(5,Number(v)||1)); model.setAttribute('scale', `${v} ${v} ${v}`); }
+    // Load from ?src= URL param if present
+    try {
+      const u = new URL(window.location.href);
+      const p = u.searchParams.get('src');
+      if (p) { mv.src = p; input.value = p; }
+    } catch (e) {}
 
-  function pagesURLfor(file){
-    const base = location.origin + location.pathname.replace(/\/[^/]*$/, '/');
-    return base + 'models/' + file;
-  }
-
-  async function fetchWithTimeout(url, opts={}, ms=8000){
-    return Promise.race([
-      fetch(url, opts),
-      new Promise((_,rej)=> setTimeout(()=> rej(new Error('timeout')), ms))
-    ]);
-  }
-
-  async function loadManifest(){
-    try{
-      const url = new URL('models/manifest.json', location.href).href;
-      const res = await fetchWithTimeout(url, {cache:'no-store'});
-      if(!res.ok) return null;
-      const list = await res.json();
-      if(!Array.isArray(list)) return null;
-      return list.filter(n=>/\.glb$/i.test(n));
-    }catch{ return null; }
-  }
-
-  async function fetchModelList(){
-    setStatus('Fetching models list…');
-    let names = await loadManifest();
-    if(!names){
-      // Fallback to GitHub API (may be blocked/rate-limited on Quest)
-      try{
-        const owner = location.hostname.split('.')[0];
-        const repo  = location.pathname.split('/').filter(Boolean)[0];
-        const api = `https://api.github.com/repos/${owner}/${repo}/contents/models?ref=main`;
-        const res = await fetchWithTimeout(api, {headers:{'Accept':'application/vnd.github+json'}});
-        if(res.ok){ const items = await res.json(); names = items.filter(x=>x.type==='file' && /\.glb$/i.test(x.name)).map(x=>x.name); }
-      }catch(e){ /* ignore, handled below */ }
-    }
-    const sel = $('#modelList'); sel.innerHTML='';
-    if(!names || names.length===0){
-      sel.innerHTML = '<option>(no list — add models/manifest.json or click Refresh later)</option>';
-      setStatus('Could not list /models via API. Create models/manifest.json as ["file1.glb","file2.glb",…] to enable the dropdown.', true);
-      return;
-    }
-    names.sort((a,b)=> a.localeCompare(b));
-    for(const n of names){ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); }
-    setStatus(`Found ${names.length} model(s). Selecting will auto‑load.`);
-    loadFromSelection();
-  }
-
-  async function loadFromSelection(){
-    const file = $('#modelList').value; if(!file || file.startsWith('(')) return;
-    const url = pagesURLfor(file);
-    await loadModel(url);
-  }
-
-  async function loadModel(url){
-    try{
-      const abs = new URL(url, location.href).href;
-      setStatus('Loading: '+abs);
-      const old = model.querySelector('a-entity[gltf-model]'); if(old) old.remove();
-      model.setAttribute('gltf-model', abs);
-      model.setAttribute('visible','true');
-      model.addEventListener('model-loaded', ()=>{ setStatus('Loaded: '+abs); recenter(); }, {once:true});
-      model.addEventListener('model-error', (e)=> setStatus('Error: '+(e?.detail||'model error'), true), {once:true});
-      setScale(1);
-    }catch(e){ setStatus('Bad URL', true); }
-  }
-
-  // Buttons
-  $('#refresh').addEventListener('click', fetchModelList);
-  $('#modelList').addEventListener('change', loadFromSelection);
-  $('#loadManual').addEventListener('click', ()=> loadModel($('#manual').value.trim()));
-  $('#enter').addEventListener('click', ()=> sceneEl.enterVR());
-  $('#place').addEventListener('click', ()=> placeOnReticle());
-  $('#here').addEventListener('click', ()=> recenter());
-  $('#smaller').addEventListener('click', ()=> setScale(model.getAttribute('scale').x - 0.1));
-  $('#bigger').addEventListener('click', ()=> setScale(model.getAttribute('scale').x + 0.1));
-
-  // Placement helpers
-  function placeOnReticle(){
-    if (!reticle.getAttribute('visible')) { setStatus('No plane found — look at a lit floor.', true); return; }
-    const p = reticle.object3D.position; const q = reticle.object3D.quaternion;
-    model.object3D.position.copy(p); model.object3D.quaternion.copy(q);
-    setStatus('Placed on reticle');
-  }
-  function recenter(){
-    const dir = new THREE.Vector3(0,0,-1); cam.object3D.getWorldDirection(dir);
-    const camPos = new THREE.Vector3(); cam.object3D.getWorldPosition(camPos);
-    const target = camPos.clone().add(dir.multiplyScalar(1.0));
-    model.object3D.position.copy(target);
-    model.object3D.quaternion.copy(cam.object3D.quaternion);
-    setStatus('Recentered near camera');
-  }
-
-  // Components
-  AFRAME.registerComponent('ar-hit-test',{
-    init(){ this.viewerSpace=null; this.hitTestSource=null; this.refSpace=null;
-      const xr=this.el.sceneEl.renderer.xr;
-      this.onSession=()=>{ const session=xr.getSession(); if(!session) return;
-        session.requestReferenceSpace('viewer').then((s)=>{ this.viewerSpace=s; });
-        session.requestReferenceSpace('local-floor').then(rs=>{ this.refSpace=rs; });
-        session.requestHitTestSource({space:this.viewerSpace}).then(src=>{ this.hitTestSource=src; }); };
-      this.onEnd=()=>{ this.viewerSpace=null; if(this.hitTestSource){ this.hitTestSource.cancel && this.hitTestSource.cancel(); this.hitTestSource=null; } };
-      xr.addEventListener('sessionstart', this.onSession); xr.addEventListener('sessionend', this.onEnd);
-    },
-    tick(){ const xr=this.el.sceneEl.renderer.xr; const session=xr.getSession(); if(!session||!this.hitTestSource||!this.refSpace) { this.el.setAttribute('visible','false'); return; }
-      const frame=xr.getFrame(); const hits=frame.getHitTestResults(this.hitTestSource); if(hits && hits.length){ const pose=hits[0].getPose(this.refSpace); const m=this.el.object3D; m.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z); m.quaternion.set(pose.transform.orientation.x, pose.transform.orientation.y, pose.transform.orientation.z, pose.transform.orientation.w); this.el.setAttribute('visible','true'); } else { this.el.setAttribute('visible','false'); } }
-  });
-
-  AFRAME.registerComponent('grabber',{
-    init(){ this.grabbed=null; this.offset=new THREE.Matrix4(); this.tmpMat=new THREE.Matrix4();
-      this.el.addEventListener('selectstart', ()=>this.tryGrab());
-      this.el.addEventListener('selectend', ()=>this.release()); },
-    raycastHit(){ const rc=this.el.components.raycaster; if(!rc||!rc.intersections.length) return null; return rc.intersections[0]?.object?.el || null; },
-    tryGrab(){ const hit=this.raycastHit(); if(!hit) return; if(!hit.classList.contains('interactive')) return;
-      this.grabbed=hit; const ctrl = this.el.object3D; const obj = hit.object3D; const invCtrl = new THREE.Matrix4().copy(ctrl.matrixWorld).invert(); this.offset.copy(invCtrl).multiply(obj.matrixWorld); },
-    release(){ this.grabbed=null; },
-    tick(){ if(!this.grabbed) return; const ctrl = this.el.object3D; this.tmpMat.copy(ctrl.matrixWorld).multiply(this.offset); this.tmpMat.decompose(this.grabbed.object3D.position, this.grabbed.object3D.quaternion, this.grabbed.object3D.scale); }
-  });
-
-  AFRAME.registerComponent('vr-only',{
-    init(){ const s=this.el.sceneEl; const update=()=>{ this.el.setAttribute('visible', !s.is('ar-mode')); }; s.addEventListener('enter-vr', update); s.addEventListener('exit-vr', update); update(); }
-  });
-
-  AFRAME.registerComponent('teleport-vr',{
-    init(){ const s=this.el.sceneEl; const el=this.el; const setup=()=>{
-      const inAR = s.is('ar-mode');
-      if(!inAR){ el.setAttribute('teleport-controls', 'button: thumbstick; collisionEntities: #ground'); }
-      else { el.removeAttribute('teleport-controls'); }
+    // Display AR support state
+    const refreshSupport = () => {
+      const can = mv.canActivateAR; // boolean exposed by model-viewer
+      support.textContent = `AR support: ${can ? 'available' : 'unavailable'} (mode: webxr)`;
+      enterBtn.disabled = !can;
+      enterBtn.title = can ? 'Enter passthrough' : 'AR not available in this browser or context';
     };
-    this._onEnter=()=>setup(); this._onExit=()=>setup();
-    s.addEventListener('enter-vr', this._onEnter); s.addEventListener('exit-vr', this._onExit);
-    setup();
-  });
 
-  // Kick off
-  fetchModelList().catch(()=> setStatus('Failed to load model list', true));
+    mv.addEventListener('load', () => {
+      status.textContent = `Loaded: ${mv.src}`;
+    });
+
+    mv.addEventListener('error', (e) => {
+      status.innerHTML = `<span class="error">Error: ${e.detail?.message || 'failed to load model'}</span>`;
+    });
+
+    mv.addEventListener('ar-status', (e) => {
+      if (e.detail.status === 'failed') {
+        status.innerHTML = '<span class="error">AR failed to start. Ensure HTTPS and Quest Browser, then try again.</span>';
+      }
+    });
+
+    // Load button: set new src
+    loadBtn.addEventListener('click', () => {
+      const url = input.value.trim();
+      if (!url) return;
+      mv.src = url;
+      status.textContent = 'Loading…';
+    });
+
+    // Enter AR (passthrough) when supported
+    enterBtn.addEventListener('click', async () => {
+      try {
+        if (!mv.canActivateAR) {
+          status.innerHTML = '<span class="error">AR not available. Use Quest Browser over HTTPS.</span>';
+          return;
+        }
+        await mv.activateAR();
+      } catch (err) {
+        status.innerHTML = `<span class="error">AR error: ${err?.message || err}</span>`;
+      }
+    });
+
+    // Initial state
+    refreshSupport();
+    // Some browsers resolve canActivateAR after upgrade; re-check shortly
+    setTimeout(refreshSupport, 1000);
   </script>
 </body>
 </html>
