@@ -20,7 +20,7 @@
   </style>
 </head>
 <body>
-  <!-- Overlay UI lives outside the WebGL canvas so it works in-headset -->
+  <!-- Overlay UI (works on desktop; on Quest, use 3D buttons in MR) -->
   <div id="hud">
     <header>
       <input id="src" type="url" placeholder="models/your.glb or https://…/file.glb" />
@@ -34,31 +34,41 @@
         <input id="scaleNum" type="number" min="0.05" max="5" step="0.05" value="1" style="width:64px;padding:.35rem .4rem;border-radius:.4rem;border:1px solid #233;background:#0d1326;color:#e5e7eb;" />
       </div>
     </header>
-    <div id="status">Ready.</div>
+    <div id="status">Ready. (Tip: on Quest, load your model before MR or use the 3D buttons to control once in MR.)</div>
   </div>
 
-  <!-- A‑Frame scene in AR mode with hit‑test + hand tracking optional -->
   <a-scene renderer="colorManagement:true; physicallyCorrectLights:true"
            webxr="mode: ar; optionalFeatures: hit-test,anchors,local-floor,hand-tracking; overlayElement:#hud"
            xr-mode-ui="enabled: false" embedded>
 
-    <!-- Light for desktop preview (has no effect on passthrough) -->
     <a-entity light="type: directional; intensity: 1" position="1 2 1"></a-entity>
     <a-entity light="type: ambient; intensity: 0.6"></a-entity>
 
     <!-- Camera rig (device controls camera in AR) -->
     <a-entity id="rig">
-      <a-camera id="camera" wasd-controls-enabled="false"></a-camera>
-      <!-- Right controller for ray + grab -->
+      <a-camera id="camera" wasd-controls-enabled="false">
+        <!-- 3D UI attached to camera so it follows you in MR -->
+        <a-entity id="ui3d" position="0 -0.15 -0.8">
+          <a-entity class="ui-btn" ui-button="action: scaleUp" geometry="primitive: plane; width: 0.16; height: 0.06" material="color: #1f2937; opacity: 0.9" position="-0.18 0 0"></a-entity>
+          <a-text value="+" position="-0.18 0 0.01" align="center" width="2"></a-text>
+          <a-entity class="ui-btn" ui-button="action: scaleDown" geometry="primitive: plane; width: 0.16; height: 0.06" material="color: #1f2937; opacity: 0.9" position="-0.36 0 0"></a-entity>
+          <a-text value="-" position="-0.36 0 0.01" align="center" width="2"></a-text>
+          <a-entity class="ui-btn" ui-button="action: place" geometry="primitive: plane; width: 0.26; height: 0.06" material="color: #1f2937; opacity: 0.9" position="0.10 0 0"></a-entity>
+          <a-text value="Place" position="0.10 0 0.01" align="center" width="2"></a-text>
+          <a-entity class="ui-btn" ui-button="action: recenter" geometry="primitive: plane; width: 0.26; height: 0.06" material="color: #1f2937; opacity: 0.9" position="0.36 0 0"></a-entity>
+          <a-text value="Here" position="0.36 0 0.01" align="center" width="2"></a-text>
+        </a-entity>
+      </a-camera>
+
+      <!-- Right/Left controllers: ray + grab + click UI -->
       <a-entity id="right" laser-controls="hand: right"
-                raycaster="objects: .interactive; showLine: true; lineColor: #3cf"
-                grabber>
-      </a-entity>
-      <!-- Left controller (also grabs) -->
+                cursor="rayOrigin: entity; fuse: false"
+                raycaster="objects: .interactive, .ui-btn; showLine: true; lineColor: #3cf"
+                grabber></a-entity>
       <a-entity id="left" laser-controls="hand: left"
-                raycaster="objects: .interactive; showLine: false"
-                grabber>
-      </a-entity>
+                cursor="rayOrigin: entity; fuse: false"
+                raycaster="objects: .interactive, .ui-btn; showLine: false"
+                grabber></a-entity>
     </a-entity>
 
     <!-- Reticle driven by WebXR hit‑test -->
@@ -67,24 +77,20 @@
               material="color: #3cf; shader: flat; opacity: .9"
               rotation="-90 0 0"></a-entity>
 
-    <!-- Model container we move/scale/rotate; class=interactive so it can be grabbed -->
+    <!-- Model container (grabbable) -->
     <a-entity id="model" class="interactive" visible="false"></a-entity>
 
   </a-scene>
 
   <script>
-  // ---------- helpers ----------
   const $ = (s)=>document.querySelector(s);
-  const scene = document.querySelector('a-scene');
   const model = $('#model');
   const reticle = $('#reticle');
-  const camera = $('#camera');
   const statusEl = $('#status');
   const scaleSlider = $('#scale');
   const scaleNum = $('#scaleNum');
 
   function setStatus(msg, isError=false){ statusEl.textContent = msg; statusEl.style.color = isError? '#fecaca' : '#94a3b8'; }
-
   function setScale(v){ v=Math.max(0.05,Math.min(5,Number(v)||1)); model.setAttribute('scale', `${v} ${v} ${v}`); scaleSlider.value=v; scaleNum.value=v; }
 
   async function loadModel(url){
@@ -92,7 +98,6 @@
     try{
       const abs = new URL(url, location.href).href; // support relative paths
       setStatus('Loading: '+abs);
-      // Remove previous child if any
       const old = model.querySelector('a-asset-item, a-entity[gltf-model]');
       if (old) old.remove();
       model.setAttribute('gltf-model', abs);
@@ -102,9 +107,9 @@
     }catch(err){ setStatus('Bad URL', true); }
   }
 
-  // ---------- UI wiring ----------
+  // UI wiring
   $('#load').addEventListener('click', ()=> loadModel($('#src').value.trim()));
-  $('#enter').addEventListener('click', ()=> scene.enterVR());
+  $('#enter').addEventListener('click', ()=> document.querySelector('a-scene').enterVR());
   $('#place').addEventListener('click', ()=> placeOnReticle());
   $('#recenter').addEventListener('click', ()=> recenter());
   scaleSlider.addEventListener('input', ()=> setScale(scaleSlider.value));
@@ -115,7 +120,7 @@
   if (qs) { $('#src').value = qs; loadModel(qs); }
   setScale(1);
 
-  // ---------- placement ----------
+  // Placement helpers
   function placeOnReticle(){
     if (!reticle.getAttribute('visible')) { setStatus('No plane found — look at a lit floor.', true); return; }
     const p = reticle.object3D.position; const q = reticle.object3D.quaternion;
@@ -124,36 +129,48 @@
   }
   function recenter(){
     // 1m in front of the camera
-    const dir = new THREE.Vector3(0,0,-1); camera.object3D.getWorldDirection(dir);
-    const camPos = new THREE.Vector3(); camera.object3D.getWorldPosition(camPos);
+    const cam = document.getElementById('camera');
+    const dir = new THREE.Vector3(0,0,-1); cam.object3D.getWorldDirection(dir);
+    const camPos = new THREE.Vector3(); cam.object3D.getWorldPosition(camPos);
     const target = camPos.clone().add(dir.multiplyScalar(1.0));
     model.object3D.position.copy(target);
-    model.object3D.quaternion.copy(camera.object3D.quaternion);
+    model.object3D.quaternion.copy(cam.object3D.quaternion);
     setStatus('Recentered near camera');
   }
 
-  // ---------- components ----------
-  // WebXR hit‑test reticle
+  // Components
   AFRAME.registerComponent('ar-hit-test',{
-    init(){ this.viewerSpace=null; this.hitTestSource=null; this.refSpace=null; this.onSession=this.onSession.bind(this); this.onEnd=this.onEnd.bind(this); this.el.sceneEl.renderer.xr.addEventListener('sessionstart', this.onSession); this.el.sceneEl.renderer.xr.addEventListener('sessionend', this.onEnd); },
-    onSession(){ const xr=this.el.sceneEl.renderer.xr; const session=xr.getSession(); if(!session) return; session.requestReferenceSpace('viewer').then((space)=>{ this.viewerSpace=space; }); xr.getReferenceSpace && (this.refSpace=xr.getReferenceSpace()); session.requestReferenceSpace('local-floor').then(rs=>{ this.refSpace=rs; }); session.requestHitTestSource && session.requestHitTestSource({space:this.viewerSpace}).then(src=>{ this.hitTestSource=src; }); },
-    onEnd(){ this.viewerSpace=null; if(this.hitTestSource){ this.hitTestSource.cancel && this.hitTestSource.cancel(); this.hitTestSource=null; } },
-    tick(){ const xr=this.el.sceneEl.renderer.xr; const session=xr.getSession(); if(!session||!this.hitTestSource||!this.refSpace) { this.el.setAttribute('visible','false'); return; } const frame=xr.getFrame(); const hits=frame.getHitTestResults(this.hitTestSource); if(hits && hits.length){ const pose=hits[0].getPose(this.refSpace); const m=this.el.object3D; m.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z); m.quaternion.set(pose.transform.orientation.x, pose.transform.orientation.y, pose.transform.orientation.z, pose.transform.orientation.w); this.el.setAttribute('visible','true'); } else { this.el.setAttribute('visible','false'); } }
+    init(){ this.viewerSpace=null; this.hitTestSource=null; this.refSpace=null;
+      const xr=this.el.sceneEl.renderer.xr;
+      this.onSession=()=>{ const session=xr.getSession(); if(!session) return;
+        session.requestReferenceSpace('viewer').then((s)=>{ this.viewerSpace=s; });
+        session.requestReferenceSpace('local-floor').then(rs=>{ this.refSpace=rs; });
+        session.requestHitTestSource({space:this.viewerSpace}).then(src=>{ this.hitTestSource=src; }); };
+      this.onEnd=()=>{ this.viewerSpace=null; if(this.hitTestSource){ this.hitTestSource.cancel && this.hitTestSource.cancel(); this.hitTestSource=null; } };
+      xr.addEventListener('sessionstart', this.onSession); xr.addEventListener('sessionend', this.onEnd);
+    },
+    tick(){ const xr=this.el.sceneEl.renderer.xr; const session=xr.getSession(); if(!session||!this.hitTestSource||!this.refSpace) { this.el.setAttribute('visible','false'); return; }
+      const frame=xr.getFrame(); const hits=frame.getHitTestResults(this.hitTestSource); if(hits && hits.length){ const pose=hits[0].getPose(this.refSpace); const m=this.el.object3D; m.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z); m.quaternion.set(pose.transform.orientation.x, pose.transform.orientation.y, pose.transform.orientation.z, pose.transform.orientation.w); this.el.setAttribute('visible','true'); } else { this.el.setAttribute('visible','false'); } }
   });
 
-  // Controller-based grab
   AFRAME.registerComponent('grabber',{
-    init(){ this.grabbed=null; this.offset=new THREE.Matrix4(); this.tmpMat=new THREE.Matrix4(); this.tmpVec=new THREE.Vector3(); this.tmpQuat=new THREE.Quaternion(); this.el.addEventListener('selectstart', e=>this.tryGrab()); this.el.addEventListener('selectend', e=>this.release()); },
-    raycastHit(){ const rc=this.el.components.raycaster; if(!rc||!rc.intersections.length) return null; // nearest hit
-      return rc.intersections[0]?.object?.el || null; },
-    tryGrab(){ const hit=this.raycastHit(); if(!hit) return; if(!hit.classList.contains('interactive')) return; this.grabbed=hit; // compute controller->object offset
-      const ctrl = this.el.object3D; const obj = hit.object3D; const invCtrl = new THREE.Matrix4().copy(ctrl.matrixWorld).invert(); this.offset.copy(invCtrl).multiply(obj.matrixWorld); },
+    init(){ this.grabbed=null; this.offset=new THREE.Matrix4(); this.tmpMat=new THREE.Matrix4();
+      this.el.addEventListener('selectstart', ()=>this.tryGrab());
+      this.el.addEventListener('selectend', ()=>this.release()); },
+    raycastHit(){ const rc=this.el.components.raycaster; if(!rc||!rc.intersections.length) return null; return rc.intersections[0]?.object?.el || null; },
+    tryGrab(){ const hit=this.raycastHit(); if(!hit) return; if (hit.classList.contains('ui-btn')) { hit.emit('uiclick'); return; } if(!hit.classList.contains('interactive')) return;
+      this.grabbed=hit; const ctrl = this.el.object3D; const obj = hit.object3D; const invCtrl = new THREE.Matrix4().copy(ctrl.matrixWorld).invert(); this.offset.copy(invCtrl).multiply(obj.matrixWorld); },
     release(){ this.grabbed=null; },
-    tick(){ if(!this.grabbed) return; // follow controller with maintained offset
-      const ctrl = this.el.object3D; this.tmpMat.copy(ctrl.matrixWorld).multiply(this.offset); this.tmpMat.decompose(this.grabbed.object3D.position, this.grabbed.object3D.quaternion, this.grabbed.object3D.scale); }
+    tick(){ if(!this.grabbed) return; const ctrl = this.el.object3D; this.tmpMat.copy(ctrl.matrixWorld).multiply(this.offset); this.tmpMat.decompose(this.grabbed.object3D.position, this.grabbed.object3D.quaternion, this.grabbed.object3D.scale); }
   });
 
-  // Desktop preview convenience: click to load default sample
+  AFRAME.registerComponent('ui-button',{
+    schema:{action:{type:'string'}},
+    init(){ this.el.addEventListener('uiclick', ()=> this.run()); },
+    run(){ const a=this.data.action; if(a==='scaleUp') setScale(Number(scaleSlider.value)+0.1); else if(a==='scaleDown') setScale(Number(scaleSlider.value)-0.1); else if(a==='place') placeOnReticle(); else if(a==='recenter') recenter(); }
+  });
+
+  // Desktop default
   if (!qs && !$('#src').value) {
     $('#src').value = 'https://modelviewer.dev/shared-assets/models/Astronaut.glb';
     loadModel($('#src').value);
