@@ -3,16 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Advanced MR Viewer (Quest) — Grab + Teleport (VR)</title>
-  <!-- A‑Frame core -->
+  <title>Advanced MR Viewer (Quest) — Grab + (VR) Teleport</title>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  <!-- Teleport controls (VR fallback only) -->
   <script src="https://cdn.jsdelivr.net/npm/aframe-teleport-controls@0.3.3/dist/aframe-teleport-controls.min.js"></script>
   <style>
     :root{--bg:#0b1020;--panel:#111827;--muted:#94a3b8;--accent:#38bdf8}
     html,body{height:100%;margin:0;background:var(--bg);color:#e5e7eb;font:16px/1.35 system-ui,Segoe UI,Roboto}
     header{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.6rem;background:var(--panel);position:sticky;top:0;z-index:10}
-    select,button{padding:.5rem .8rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb;cursor:pointer}
+    select,input,button{padding:.5rem .8rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb}
+    button{cursor:pointer}
     #status{padding:.4rem .6rem;color:var(--muted);font-size:.9rem}
     .grow{flex:1;min-width:280px}
     a-scene{height:calc(100% - 96px)}
@@ -22,26 +21,26 @@
   <header>
     <select id="modelList" class="grow"><option>Loading models/ …</option></select>
     <button id="refresh">Refresh</button>
+    <span>or</span>
+    <input id="manual" class="grow" placeholder="manual URL e.g. models/your.glb" />
+    <button id="loadManual">Load</button>
     <button id="enter" style="background:#38bdf8;color:#001421;border-color:#0ea5e9">Enter MR</button>
-    <button id="place">Place on reticle</button>
+    <button id="place">Place</button>
     <button id="here">Here</button>
     <button id="smaller">−</button>
     <button id="bigger">+</button>
   </header>
-  <div id="status">Ready. Pick a file from <code>models/</code>, it will auto‑load. Then Enter MR. (Grab with trigger. Teleport works only in VR fallback.)</div>
+  <div id="status">Ready. Pick from the dropdown (reads <code>models/manifest.json</code> if present; otherwise uses GitHub API). Selecting a model auto‑loads it.</div>
 
   <a-scene renderer="colorManagement:true; physicallyCorrectLights:true"
            webxr="mode: ar; optionalFeatures: hit-test,anchors,local-floor,hand-tracking"
            xr-mode-ui="enabled: false" embedded>
 
-    <!-- Lights (for desktop preview) -->
     <a-entity light="type: directional; intensity: 1" position="1 2 1"></a-entity>
     <a-entity light="type: ambient; intensity: 0.6"></a-entity>
 
-    <!-- Camera rig -->
     <a-entity id="rig">
       <a-camera id="camera" wasd-controls-enabled="false"></a-camera>
-      <!-- Controllers: ray + grab. Teleport components are VR‑only. -->
       <a-entity id="right" laser-controls="hand: right"
                 raycaster="objects: .interactive; showLine: true; lineColor: #3cf"
                 cursor="rayOrigin: entity; fuse: false"
@@ -52,16 +51,13 @@
                 grabber teleport-vr></a-entity>
     </a-entity>
 
-    <!-- Reticle from WebXR hit‑test (for AR placement) -->
     <a-entity id="reticle" ar-hit-test visible="false"
               geometry="primitive: ring; radiusInner: 0.06; radiusOuter: 0.075"
               material="color: #3cf; shader: flat; opacity: .9"
               rotation="-90 0 0"></a-entity>
 
-    <!-- Model container (grabbable) -->
     <a-entity id="model" class="interactive" visible="false"></a-entity>
 
-    <!-- VR‑only ground so teleport has a target in fallback mode -->
     <a-entity id="ground" vr-only geometry="primitive: circle; radius: 4" material="color: #1f2937; opacity: 0.25" rotation="-90 0 0" position="0 0 -1"></a-entity>
   </a-scene>
 
@@ -76,41 +72,61 @@
   function setStatus(msg, err=false){ statusEl.textContent=msg; statusEl.style.color=err?'#fecaca':'#94a3b8'; }
   function setScale(v){ v=Math.max(0.05,Math.min(5,Number(v)||1)); model.setAttribute('scale', `${v} ${v} ${v}`); }
 
-  // ----- Populate dropdown from GitHub API (lists /models files) -----
-  async function fetchModelList(){
-    const owner = location.hostname.split('.')[0]; // johnmccarthyflinders
-    const repo  = location.pathname.split('/').filter(Boolean)[0]; // AR_Viewer
-    const api = `https://api.github.com/repos/${owner}/${repo}/contents/models?ref=main`;
-    setStatus('Fetching models list…');
-    const res = await fetch(api);
-    if(!res.ok){ setStatus('Could not list models/ (GitHub API)', true); return; }
-    const items = await res.json();
-    const glbs = items.filter(x=>x.type==='file' && /\.glb$/i.test(x.name));
-    const sel = $('#modelList'); sel.innerHTML='';
-    if(glbs.length===0){ sel.innerHTML = '<option>(no .glb files in /models)</option>'; return; }
-    glbs.forEach(f=>{
-      const opt = document.createElement('option');
-      opt.value = f.name; opt.textContent = f.name; sel.appendChild(opt);
-    });
-    setStatus(`Found ${glbs.length} model(s).`);
-    // Auto‑load first
-    loadFromSelection();
-  }
-
-  function currentPagesURL(file){
-    // Build a same‑origin Pages URL to avoid CORS
-    const base = location.origin + location.pathname.replace(/\/[^/]*$/, '/'); // repo root path
+  function pagesURLfor(file){
+    const base = location.origin + location.pathname.replace(/\/[^/]*$/, '/');
     return base + 'models/' + file;
   }
 
+  async function fetchWithTimeout(url, opts={}, ms=8000){
+    return Promise.race([
+      fetch(url, opts),
+      new Promise((_,rej)=> setTimeout(()=> rej(new Error('timeout')), ms))
+    ]);
+  }
+
+  async function loadManifest(){
+    try{
+      const url = new URL('models/manifest.json', location.href).href;
+      const res = await fetchWithTimeout(url, {cache:'no-store'});
+      if(!res.ok) return null;
+      const list = await res.json();
+      if(!Array.isArray(list)) return null;
+      return list.filter(n=>/\.glb$/i.test(n));
+    }catch{ return null; }
+  }
+
+  async function fetchModelList(){
+    setStatus('Fetching models list…');
+    let names = await loadManifest();
+    if(!names){
+      // Fallback to GitHub API (may be blocked/rate-limited on Quest)
+      try{
+        const owner = location.hostname.split('.')[0];
+        const repo  = location.pathname.split('/').filter(Boolean)[0];
+        const api = `https://api.github.com/repos/${owner}/${repo}/contents/models?ref=main`;
+        const res = await fetchWithTimeout(api, {headers:{'Accept':'application/vnd.github+json'}});
+        if(res.ok){ const items = await res.json(); names = items.filter(x=>x.type==='file' && /\.glb$/i.test(x.name)).map(x=>x.name); }
+      }catch(e){ /* ignore, handled below */ }
+    }
+    const sel = $('#modelList'); sel.innerHTML='';
+    if(!names || names.length===0){
+      sel.innerHTML = '<option>(no list — add models/manifest.json or click Refresh later)</option>';
+      setStatus('Could not list /models via API. Create models/manifest.json as ["file1.glb","file2.glb",…] to enable the dropdown.', true);
+      return;
+    }
+    names.sort((a,b)=> a.localeCompare(b));
+    for(const n of names){ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); }
+    setStatus(`Found ${names.length} model(s). Selecting will auto‑load.`);
+    loadFromSelection();
+  }
+
   async function loadFromSelection(){
-    const file = $('#modelList').value; if(!file) return;
-    const url = currentPagesURL(file);
+    const file = $('#modelList').value; if(!file || file.startsWith('(')) return;
+    const url = pagesURLfor(file);
     await loadModel(url);
   }
 
   async function loadModel(url){
-    if(!url) return;
     try{
       const abs = new URL(url, location.href).href;
       setStatus('Loading: '+abs);
@@ -126,6 +142,7 @@
   // Buttons
   $('#refresh').addEventListener('click', fetchModelList);
   $('#modelList').addEventListener('change', loadFromSelection);
+  $('#loadManual').addEventListener('click', ()=> loadModel($('#manual').value.trim()));
   $('#enter').addEventListener('click', ()=> sceneEl.enterVR());
   $('#place').addEventListener('click', ()=> placeOnReticle());
   $('#here').addEventListener('click', ()=> recenter());
@@ -174,21 +191,15 @@
     tick(){ if(!this.grabbed) return; const ctrl = this.el.object3D; this.tmpMat.copy(ctrl.matrixWorld).multiply(this.offset); this.tmpMat.decompose(this.grabbed.object3D.position, this.grabbed.object3D.quaternion, this.grabbed.object3D.scale); }
   });
 
-  // Show entity only in VR (not AR)
   AFRAME.registerComponent('vr-only',{
     init(){ const s=this.el.sceneEl; const update=()=>{ this.el.setAttribute('visible', !s.is('ar-mode')); }; s.addEventListener('enter-vr', update); s.addEventListener('exit-vr', update); update(); }
   });
 
-  // Add teleport controls only when *not* in AR
   AFRAME.registerComponent('teleport-vr',{
     init(){ const s=this.el.sceneEl; const el=this.el; const setup=()=>{
       const inAR = s.is('ar-mode');
-      if(!inAR){
-        // enable teleport to #ground with thumbstick
-        el.setAttribute('teleport-controls', 'button: thumbstick; collisionEntities: #ground');
-      } else {
-        el.removeAttribute('teleport-controls');
-      }
+      if(!inAR){ el.setAttribute('teleport-controls', 'button: thumbstick; collisionEntities: #ground'); }
+      else { el.removeAttribute('teleport-controls'); }
     };
     this._onEnter=()=>setup(); this._onExit=()=>setup();
     s.addEventListener('enter-vr', this._onEnter); s.addEventListener('exit-vr', this._onExit);
