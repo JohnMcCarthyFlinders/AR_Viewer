@@ -40,11 +40,14 @@
   </div>
 
   <a-scene renderer="colorManagement:true; physicallyCorrectLights:true"
-           webxr="mode: ar; optionalFeatures: hit-test,anchors,local-floor,hand-tracking; overlayElement:#hud"
+           webxr="mode: ar; optionalFeatures: hit-test,anchors,local-floor,hand-tracking"
            xr-mode-ui="enabled: false" embedded>
 
     <a-entity light="type: directional; intensity: 1" position="1 2 1"></a-entity>
     <a-entity light="type: ambient; intensity: 0.6"></a-entity>
+
+    <!-- VR fallback ground (hidden in AR) -->
+    <a-entity id="ground" vr-only geometry="primitive: circle; radius: 3" material="color: #1f2937; wireframe: true; opacity: 0.4" rotation="-90 0 0" position="0 0 -1"></a-entity>
 
     <!-- Camera rig (device controls camera in AR) -->
     <a-entity id="rig">
@@ -104,7 +107,12 @@
       if (old) old.remove();
       model.setAttribute('gltf-model', abs);
       model.setAttribute('visible','true');
-      model.addEventListener('model-loaded', ()=> setStatus('Loaded: '+abs), {once:true});
+      model.addEventListener('model-loaded', ()=> { setStatus('Loaded: '+abs); recenter(); }, {once:true});
+      model.addEventListener('model-error', (e)=> setStatus('Error: '+(e?.detail||'model error'), true), {once:true});
+      // Apply current UI scale
+      setScale(scaleSlider.value);
+    }catch(err){ setStatus('Bad URL', true); }
+  });
       model.addEventListener('model-error', (e)=> setStatus('Error: '+(e?.detail||'model error'), true), {once:true});
     }catch(err){ setStatus('Bad URL', true); }
   }
@@ -114,6 +122,9 @@
   $('#focus').addEventListener('click', ()=> { const i=$('#src'); i.focus(); setStatus('URL box focused'); });
   $('#paste').addEventListener('click', async ()=> { try{ const t=await navigator.clipboard.readText(); if(t){ $('#src').value=t; setStatus('Pasted from clipboard'); } else { setStatus('Clipboard empty', true);} } catch(e){ setStatus('Clipboard not available here', true);} });
   $('#enter').addEventListener('click', ()=> document.querySelector('a-scene').enterVR());
+  const sceneEl = document.querySelector('a-scene');
+  sceneEl.addEventListener('enter-vr', ()=> setStatus(sceneEl.is('ar-mode') ? 'AR session started' : 'VR fallback started'));
+  sceneEl.addEventListener('exit-vr', ()=> setStatus('Session ended'));
   $('#place').addEventListener('click', ()=> placeOnReticle());
   $('#recenter').addEventListener('click', ()=> recenter());
   scaleSlider.addEventListener('input', ()=> setScale(scaleSlider.value));
@@ -147,6 +158,20 @@
     init(){ this.viewerSpace=null; this.hitTestSource=null; this.refSpace=null;
       const xr=this.el.sceneEl.renderer.xr;
       this.onSession=()=>{ const session=xr.getSession(); if(!session) return;
+        session.requestReferenceSpace('viewer').then((s)=>{ this.viewerSpace=s; });
+        session.requestReferenceSpace('local-floor').then(rs=>{ this.refSpace=rs; });
+        session.requestHitTestSource({space:this.viewerSpace}).then(src=>{ this.hitTestSource=src; }); };
+      this.onEnd=()=>{ this.viewerSpace=null; if(this.hitTestSource){ this.hitTestSource.cancel && this.hitTestSource.cancel(); this.hitTestSource=null; } };
+      xr.addEventListener('sessionstart', this.onSession); xr.addEventListener('sessionend', this.onEnd);
+    },
+    tick(){ const xr=this.el.sceneEl.renderer.xr; const session=xr.getSession(); if(!session||!this.hitTestSource||!this.refSpace) { this.el.setAttribute('visible','false'); return; }
+      const frame=xr.getFrame(); const hits=frame.getHitTestResults(this.hitTestSource); if(hits && hits.length){ const pose=hits[0].getPose(this.refSpace); const m=this.el.object3D; m.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z); m.quaternion.set(pose.transform.orientation.x, pose.transform.orientation.y, pose.transform.orientation.z, pose.transform.orientation.w); this.el.setAttribute('visible','true'); } else { this.el.setAttribute('visible','false'); } }
+  });
+
+  // Show entity only in VR (not AR)
+  AFRAME.registerComponent('vr-only',{
+    init(){ const s=this.el.sceneEl; const update=()=>{ this.el.setAttribute('visible', !s.is('ar-mode')); }; s.addEventListener('enter-vr', update); s.addEventListener('exit-vr', update); update(); }
+  }); if(!session) return;
         session.requestReferenceSpace('viewer').then((s)=>{ this.viewerSpace=s; });
         session.requestReferenceSpace('local-floor').then(rs=>{ this.refSpace=rs; });
         session.requestHitTestSource({space:this.viewerSpace}).then(src=>{ this.hitTestSource=src; }); };
