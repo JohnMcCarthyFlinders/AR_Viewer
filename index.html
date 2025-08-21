@@ -28,7 +28,17 @@
       <label style="display:flex;align-items:center;gap:.5rem;margin-left:.75rem;white-space:nowrap;">
       Scale
       <input id="scaleSlider" type="range" min="0.05" max="5" step="0.05" value="1" style="width:160px;"/>
-      <input id="scaleNum" type="number" min="0.05" max="5" step="0.05" value="1" style="width:64px;padding:.35r
+      <input id="scaleNum" type="number" min="0.05" max="5" step="0.05" value="1" style="width:64px;padding:.35rem .4rem;border-radius:.4rem;border:1px solid #233;background:#0d1326;color:#e5e7eb;"/>
+    </label>
+      <label style="display:flex;align-items:center;gap:.5rem;margin-left:.75rem;white-space:nowrap;">
+      Scale
+      <input id="scaleSlider" type="range" min="0.05" max="5" step="0.05" value="1" style="width:160px;"/>
+      <input id="scaleNum" type="number" min="0.05" max="5" step="0.05" value="1" style="width:64px;padding:.35rem .4rem;border-radius:.4rem;border:1px solid #233;background:#0d1326;color:#e5e7eb;"/>
+    </label>
+    <label style="display:flex;align-items:center;gap:.4rem;margin-left:.75rem;white-space:nowrap;">
+      <input id="lockScale" type="checkbox" checked /> Lock scale in MR
+    </label>
+  </header>
 
   <div class="hint" id="status">Paste a GLB URL or use the default below. On Quest, tap <em>Enter MR</em> to switch to passthrough.</div>
 
@@ -66,6 +76,14 @@
     const enterBtn = document.getElementById('enterAr');
     const status = document.getElementById('status');
     const support = document.getElementById('support');
+    const scaleSlider = document.getElementById('scaleSlider');
+    const scaleNum = document.getElementById('scaleNum');
+    const lockScaleEl = document.getElementById('lockScale');
+
+    let inAR = false;
+    let lockRAF = 0;
+    let lockedVal = 1;
+    const scaleNum = document.getElementById('scaleNum');
 
     // Load from ?src= URL param if present
     try {
@@ -84,6 +102,11 @@
 
     mv.addEventListener('load', () => {
       status.textContent = `Loaded: ${mv.src}`;
+      // Reset scale UI on new model load
+      const s = 1;
+      scaleSlider.value = s;
+      scaleNum.value = s;
+      mv.scale = `${s} ${s} ${s}`;
     });
 
     mv.addEventListener('error', (e) => {
@@ -93,6 +116,15 @@
     mv.addEventListener('ar-status', (e) => {
       if (e.detail.status === 'failed') {
         status.innerHTML = '<span class="error">AR failed to start. Ensure HTTPS and Quest Browser, then try again.</span>';
+      }
+      if (e.detail.status === 'session-started') {
+        inAR = true;
+        // start scale lock if enabled
+        if (lockScaleEl.checked) startScaleLock();
+      }
+      if (e.detail.status === 'not-presenting') {
+        inAR = false;
+        stopScaleLock();
       }
     });
 
@@ -115,6 +147,35 @@
       } catch (err) {
         status.innerHTML = `<span class="error">AR error: ${err?.message || err}</span>`;
       }
+    });
+
+    // Scale controls (pre-MR and during MR session)
+    const applyScale = (val) => {
+      const v = Math.max(0.05, Math.min(5, Number(val) || 1));
+      mv.scale = `${v} ${v} ${v}`;
+      scaleSlider.value = v;
+      scaleNum.value = v;
+      lockedVal = v; // keep lock target in sync
+    };
+    scaleSlider.addEventListener('input', () => applyScale(scaleSlider.value));
+    scaleNum.addEventListener('input', () => applyScale(scaleNum.value));
+
+    function startScaleLock() {
+      stopScaleLock();
+      const loop = () => {
+        if (inAR && lockScaleEl.checked) {
+          // Force the scale every frame to prevent controller-gesture scaling
+          mv.scale = `${lockedVal} ${lockedVal} ${lockedVal}`;
+          lockRAF = requestAnimationFrame(loop);
+        }
+      };
+      lockRAF = requestAnimationFrame(loop);
+    }
+    function stopScaleLock() { if (lockRAF) cancelAnimationFrame(lockRAF); lockRAF = 0; }
+
+    lockScaleEl.addEventListener('change', () => {
+      if (inAR && lockScaleEl.checked) startScaleLock();
+      else stopScaleLock();
     });
 
     // Initial state
