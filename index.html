@@ -4,15 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Safe GLB Viewer (Quest WebXR)</title>
-  <!-- Pin model-viewer version to avoid breaking changes -->
+  <!-- Pin a stable model-viewer -->
   <script type="module" src="https://unpkg.com/@google/model-viewer@3.3.0/dist/model-viewer.min.js"></script>
   <style>
     html,body{margin:0;height:100%;background:#0b1020;color:#e5e7eb;font:16px/1.3 system-ui,Segoe UI,Roboto}
-    header{display:flex;gap:.5rem;align-items:center;padding:.6rem;background:#111827;position:sticky;top:0;z-index:10}
+    header{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.6rem;background:#111827;position:sticky;top:0;z-index:10}
     input[type=url]{flex:1;min-width:320px;padding:.45rem .6rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb}
     button{padding:.5rem .8rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb;cursor:pointer}
     button.primary{background:#38bdf8;color:#001421;border-color:#0ea5e9}
     #status{padding:.4rem .6rem;color:#94a3b8;font-size:.9rem}
+    #status.error{color:#fecaca}
     model-viewer{width:100%;height:calc(100% - 92px);display:block;background:#0a0f1f}
   </style>
 </head>
@@ -23,17 +24,16 @@
     <button id="ar" class="primary">Enter MR (passthrough)</button>
     <button data-demo="astro">Astronaut</button>
     <button data-demo="robot">Robot</button>
+    <button data-demo="duck">Duck</button>
     <button data-demo="bottle">Bottle</button>
   </header>
 
   <div id="status">Ready.</div>
 
-  <!-- Default shows helmet so you always see *something* even if JS errors -->
   <model-viewer id="mv"
     src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/DamagedHelmet/glTF-Binary/DamagedHelmet.glb"
-    ar ar-modes="webxr"
-    camera-controls
-    touch-action="pan-y">
+    ar ar-modes="webxr" camera-controls touch-action="pan-y"
+    crossorigin="anonymous">
   </model-viewer>
 
   <script>
@@ -43,22 +43,24 @@
     const arBtn = document.getElementById('ar');
     const status = document.getElementById('status');
 
-    // Minimal, bullet-proof loader
+    function sameOrigin(u){
+      try{const x=new URL(u,location.origin);return x.origin===location.origin;}catch{return false;}
+    }
     function loadModel(url) {
       if (!url) return;
-      // Cache-bust to beat CDN/browser caches
-      const busted = url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now();
-      mv.setAttribute('src', busted);
-      status.textContent = 'Loading: ' + url;
+      const abs = new URL(url, location.href).href;
+      const use = sameOrigin(abs) ? (abs + (abs.includes('?') ? '&' : '?') + 'v=' + Date.now()) : abs;
+      mv.setAttribute('src', use);
+      status.className=''; status.textContent = 'Loading: ' + abs;
     }
 
     loadBtn.addEventListener('click', () => loadModel(input.value.trim()));
 
-    // Presets (not the helmet) to prove swapping works
     const demos = {
       astro:  'https://modelviewer.dev/shared-assets/models/Astronaut.glb',
       robot:  'https://modelviewer.dev/shared-assets/models/RobotExpressive.glb',
-      bottle: 'https://modelviewer.dev/shared-assets/models/WaterBottle.glb',
+      duck:   'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Duck/glTF-Binary/Duck.glb',
+      bottle: 'https://modelviewer.dev/shared-assets/models/WaterBottle.glb'
     };
     document.querySelectorAll('[data-demo]').forEach(b =>
       b.addEventListener('click', () => {
@@ -68,19 +70,14 @@
       })
     );
 
-    // Feedback
-    mv.addEventListener('load', () => { status.textContent = 'Loaded: ' + mv.src; });
+    mv.addEventListener('load', () => { status.className=''; status.textContent = 'Loaded: ' + mv.src; });
     mv.addEventListener('error', (e) => {
-      status.textContent = 'Error loading model.';
+      status.className='error';
+      const msg = e?.detail?.message || e?.message || 'Unknown error';
+      status.textContent = 'Error loading model: ' + msg;
       console.error('Model load error:', e);
     });
 
-    // Enter passthrough AR
-    arBtn.addEventListener('click', async () => {
-      try { await mv.activateAR(); } catch (e) { status.textContent = 'AR not available here.'; }
-    });
-
-    // Handle ?src= without any extra logic
     const p = new URLSearchParams(location.search).get('src');
     if (p) { input.value = p; loadModel(p); }
   </script>
