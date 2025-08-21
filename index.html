@@ -3,80 +3,56 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Quest MR Grabbable Viewer (A‑Frame)</title>
-  <!-- A-Frame (stable) -->
+  <title>Advanced MR Viewer (Quest) — Grab + Teleport (VR)</title>
+  <!-- A‑Frame core -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <!-- Teleport controls (VR fallback only) -->
+  <script src="https://cdn.jsdelivr.net/npm/aframe-teleport-controls@0.3.3/dist/aframe-teleport-controls.min.js"></script>
   <style>
     :root{--bg:#0b1020;--panel:#111827;--muted:#94a3b8;--accent:#38bdf8}
     html,body{height:100%;margin:0;background:var(--bg);color:#e5e7eb;font:16px/1.35 system-ui,Segoe UI,Roboto}
-    #hud{position:fixed;inset:0;pointer-events:none;z-index:9999} header, #status{pointer-events:auto} a-scene{position:relative;z-index:1} canvas.a-canvas{position:relative;z-index:0}
-    header{pointer-events:auto;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.6rem;background:var(--panel);}
-    input[type=url]{flex:1;min-width:320px;padding:.45rem .6rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb}
-    button{pointer-events:auto;cursor:pointer;padding:.5rem .8rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb}
-    .primary{background:var(--accent);color:#001421;border-color:#0ea5e9}
-    #status{pointer-events:auto;padding:.4rem .6rem;color:var(--muted);font-size:.9rem}
-    #scaleBox{display:flex;align-items:center;gap:.5rem}
-    #scaleBox input[type=range]{width:160px}
+    header{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.6rem;background:var(--panel);position:sticky;top:0;z-index:10}
+    select,button{padding:.5rem .8rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb;cursor:pointer}
+    #status{padding:.4rem .6rem;color:var(--muted);font-size:.9rem}
+    .grow{flex:1;min-width:280px}
+    a-scene{height:calc(100% - 96px)}
   </style>
 </head>
 <body>
-  <!-- Overlay UI (works on desktop; on Quest, use 3D buttons in MR) -->
-  <div id="hud">
-    <header>
-      <input id="src" type="url" placeholder="models/your.glb or https://…/file.glb" />
-      <button id="load">Load</button>
-      <button id="focus">Focus URL</button>
-      <button id="paste">Paste</button>
-      <button id="enter" class="primary">Enter MR</button>
-      <button id="place">Place on reticle</button>
-      <button id="recenter">Recenter near me</button>
-      <div id="scaleBox">
-        <label>Scale</label>
-        <input id="scale" type="range" min="0.05" max="5" step="0.05" value="1" />
-        <input id="scaleNum" type="number" min="0.05" max="5" step="0.05" value="1" style="width:64px;padding:.35rem .4rem;border-radius:.4rem;border:1px solid #233;background:#0d1326;color:#e5e7eb;" />
-      </div>
-    </header>
-    <div id="status">Ready. (Tip: on Quest, load your model before MR or use the 3D buttons to control once in MR.)</div>
-  </div>
+  <header>
+    <select id="modelList" class="grow"><option>Loading models/ …</option></select>
+    <button id="refresh">Refresh</button>
+    <button id="enter" style="background:#38bdf8;color:#001421;border-color:#0ea5e9">Enter MR</button>
+    <button id="place">Place on reticle</button>
+    <button id="here">Here</button>
+    <button id="smaller">−</button>
+    <button id="bigger">+</button>
+  </header>
+  <div id="status">Ready. Pick a file from <code>models/</code>, it will auto‑load. Then Enter MR. (Grab with trigger. Teleport works only in VR fallback.)</div>
 
   <a-scene renderer="colorManagement:true; physicallyCorrectLights:true"
            webxr="mode: ar; optionalFeatures: hit-test,anchors,local-floor,hand-tracking"
            xr-mode-ui="enabled: false" embedded>
 
+    <!-- Lights (for desktop preview) -->
     <a-entity light="type: directional; intensity: 1" position="1 2 1"></a-entity>
     <a-entity light="type: ambient; intensity: 0.6"></a-entity>
 
-    <!-- VR fallback ground (hidden in AR) -->
-    <a-entity id="ground" vr-only geometry="primitive: circle; radius: 3" material="color: #1f2937; wireframe: true; opacity: 0.4" rotation="-90 0 0" position="0 0 -1"></a-entity>
-
-    <!-- Camera rig (device controls camera in AR) -->
+    <!-- Camera rig -->
     <a-entity id="rig">
-      <a-camera id="camera" wasd-controls-enabled="false">
-        <!-- 3D UI attached to camera so it follows you in MR -->
-        <a-entity id="ui3d" position="0 -0.15 -0.8">
-          <a-entity class="ui-btn" ui-button="action: scaleUp" geometry="primitive: plane; width: 0.16; height: 0.06" material="color: #1f2937; opacity: 0.9" position="-0.18 0 0"></a-entity>
-          <a-text value="+" position="-0.18 0 0.01" align="center" width="2"></a-text>
-          <a-entity class="ui-btn" ui-button="action: scaleDown" geometry="primitive: plane; width: 0.16; height: 0.06" material="color: #1f2937; opacity: 0.9" position="-0.36 0 0"></a-entity>
-          <a-text value="-" position="-0.36 0 0.01" align="center" width="2"></a-text>
-          <a-entity class="ui-btn" ui-button="action: place" geometry="primitive: plane; width: 0.26; height: 0.06" material="color: #1f2937; opacity: 0.9" position="0.10 0 0"></a-entity>
-          <a-text value="Place" position="0.10 0 0.01" align="center" width="2"></a-text>
-          <a-entity class="ui-btn" ui-button="action: recenter" geometry="primitive: plane; width: 0.26; height: 0.06" material="color: #1f2937; opacity: 0.9" position="0.36 0 0"></a-entity>
-          <a-text value="Here" position="0.36 0 0.01" align="center" width="2"></a-text>
-        </a-entity>
-      </a-camera>
-
-      <!-- Right/Left controllers: ray + grab + click UI -->
+      <a-camera id="camera" wasd-controls-enabled="false"></a-camera>
+      <!-- Controllers: ray + grab. Teleport components are VR‑only. -->
       <a-entity id="right" laser-controls="hand: right"
+                raycaster="objects: .interactive; showLine: true; lineColor: #3cf"
                 cursor="rayOrigin: entity; fuse: false"
-                raycaster="objects: .interactive, .ui-btn; showLine: true; lineColor: #3cf"
-                grabber></a-entity>
+                grabber teleport-vr></a-entity>
       <a-entity id="left" laser-controls="hand: left"
+                raycaster="objects: .interactive; showLine: false"
                 cursor="rayOrigin: entity; fuse: false"
-                raycaster="objects: .interactive, .ui-btn; showLine: false"
-                grabber></a-entity>
+                grabber teleport-vr></a-entity>
     </a-entity>
 
-    <!-- Reticle driven by WebXR hit‑test -->
+    <!-- Reticle from WebXR hit‑test (for AR placement) -->
     <a-entity id="reticle" ar-hit-test visible="false"
               geometry="primitive: ring; radiusInner: 0.06; radiusOuter: 0.075"
               material="color: #3cf; shader: flat; opacity: .9"
@@ -85,55 +61,76 @@
     <!-- Model container (grabbable) -->
     <a-entity id="model" class="interactive" visible="false"></a-entity>
 
+    <!-- VR‑only ground so teleport has a target in fallback mode -->
+    <a-entity id="ground" vr-only geometry="primitive: circle; radius: 4" material="color: #1f2937; opacity: 0.25" rotation="-90 0 0" position="0 0 -1"></a-entity>
   </a-scene>
 
   <script>
   const $ = (s)=>document.querySelector(s);
+  const statusEl = $('#status');
   const model = $('#model');
   const reticle = $('#reticle');
-  const statusEl = $('#status');
-  const scaleSlider = $('#scale');
-  const scaleNum = $('#scaleNum');
+  const sceneEl = document.querySelector('a-scene');
+  const cam = document.getElementById('camera');
 
-  function setStatus(msg, isError=false){ statusEl.textContent = msg; statusEl.style.color = isError? '#fecaca' : '#94a3b8'; }
-  function setScale(v){ v=Math.max(0.05,Math.min(5,Number(v)||1)); model.setAttribute('scale', `${v} ${v} ${v}`); scaleSlider.value=v; scaleNum.value=v; }
+  function setStatus(msg, err=false){ statusEl.textContent=msg; statusEl.style.color=err?'#fecaca':'#94a3b8'; }
+  function setScale(v){ v=Math.max(0.05,Math.min(5,Number(v)||1)); model.setAttribute('scale', `${v} ${v} ${v}`); }
+
+  // ----- Populate dropdown from GitHub API (lists /models files) -----
+  async function fetchModelList(){
+    const owner = location.hostname.split('.')[0]; // johnmccarthyflinders
+    const repo  = location.pathname.split('/').filter(Boolean)[0]; // AR_Viewer
+    const api = `https://api.github.com/repos/${owner}/${repo}/contents/models?ref=main`;
+    setStatus('Fetching models list…');
+    const res = await fetch(api);
+    if(!res.ok){ setStatus('Could not list models/ (GitHub API)', true); return; }
+    const items = await res.json();
+    const glbs = items.filter(x=>x.type==='file' && /\.glb$/i.test(x.name));
+    const sel = $('#modelList'); sel.innerHTML='';
+    if(glbs.length===0){ sel.innerHTML = '<option>(no .glb files in /models)</option>'; return; }
+    glbs.forEach(f=>{
+      const opt = document.createElement('option');
+      opt.value = f.name; opt.textContent = f.name; sel.appendChild(opt);
+    });
+    setStatus(`Found ${glbs.length} model(s).`);
+    // Auto‑load first
+    loadFromSelection();
+  }
+
+  function currentPagesURL(file){
+    // Build a same‑origin Pages URL to avoid CORS
+    const base = location.origin + location.pathname.replace(/\/[^/]*$/, '/'); // repo root path
+    return base + 'models/' + file;
+  }
+
+  async function loadFromSelection(){
+    const file = $('#modelList').value; if(!file) return;
+    const url = currentPagesURL(file);
+    await loadModel(url);
+  }
 
   async function loadModel(url){
     if(!url) return;
     try{
-      const abs = new URL(url, location.href).href; // support relative paths
+      const abs = new URL(url, location.href).href;
       setStatus('Loading: '+abs);
-      const old = model.querySelector('a-asset-item, a-entity[gltf-model]');
-      if (old) old.remove();
+      const old = model.querySelector('a-entity[gltf-model]'); if(old) old.remove();
       model.setAttribute('gltf-model', abs);
       model.setAttribute('visible','true');
-      model.addEventListener('model-loaded', ()=> { setStatus('Loaded: '+abs); recenter(); }, {once:true});
+      model.addEventListener('model-loaded', ()=>{ setStatus('Loaded: '+abs); recenter(); }, {once:true});
       model.addEventListener('model-error', (e)=> setStatus('Error: '+(e?.detail||'model error'), true), {once:true});
-      // Apply current UI scale
-      setScale(scaleSlider.value);
-    }catch(err){ setStatus('Bad URL', true); }
-  });
-      model.addEventListener('model-error', (e)=> setStatus('Error: '+(e?.detail||'model error'), true), {once:true});
-    }catch(err){ setStatus('Bad URL', true); }
+      setScale(1);
+    }catch(e){ setStatus('Bad URL', true); }
   }
 
-  // UI wiring
-  $('#load').addEventListener('click', ()=> loadModel($('#src').value.trim()));
-  $('#focus').addEventListener('click', ()=> { const i=$('#src'); i.focus(); setStatus('URL box focused'); });
-  $('#paste').addEventListener('click', async ()=> { try{ const t=await navigator.clipboard.readText(); if(t){ $('#src').value=t; setStatus('Pasted from clipboard'); } else { setStatus('Clipboard empty', true);} } catch(e){ setStatus('Clipboard not available here', true);} });
-  $('#enter').addEventListener('click', ()=> document.querySelector('a-scene').enterVR());
-  const sceneEl = document.querySelector('a-scene');
-  sceneEl.addEventListener('enter-vr', ()=> setStatus(sceneEl.is('ar-mode') ? 'AR session started' : 'VR fallback started'));
-  sceneEl.addEventListener('exit-vr', ()=> setStatus('Session ended'));
+  // Buttons
+  $('#refresh').addEventListener('click', fetchModelList);
+  $('#modelList').addEventListener('change', loadFromSelection);
+  $('#enter').addEventListener('click', ()=> sceneEl.enterVR());
   $('#place').addEventListener('click', ()=> placeOnReticle());
-  $('#recenter').addEventListener('click', ()=> recenter());
-  scaleSlider.addEventListener('input', ()=> setScale(scaleSlider.value));
-  scaleNum.addEventListener('input', ()=> setScale(scaleNum.value));
-
-  // Load via ?src=
-  const qs = new URLSearchParams(location.search).get('src');
-  if (qs) { $('#src').value = qs; loadModel(qs); }
-  setScale(1);
+  $('#here').addEventListener('click', ()=> recenter());
+  $('#smaller').addEventListener('click', ()=> setScale(model.getAttribute('scale').x - 0.1));
+  $('#bigger').addEventListener('click', ()=> setScale(model.getAttribute('scale').x + 0.1));
 
   // Placement helpers
   function placeOnReticle(){
@@ -143,8 +140,6 @@
     setStatus('Placed on reticle');
   }
   function recenter(){
-    // 1m in front of the camera
-    const cam = document.getElementById('camera');
     const dir = new THREE.Vector3(0,0,-1); cam.object3D.getWorldDirection(dir);
     const camPos = new THREE.Vector3(); cam.object3D.getWorldPosition(camPos);
     const target = camPos.clone().add(dir.multiplyScalar(1.0));
@@ -168,42 +163,40 @@
       const frame=xr.getFrame(); const hits=frame.getHitTestResults(this.hitTestSource); if(hits && hits.length){ const pose=hits[0].getPose(this.refSpace); const m=this.el.object3D; m.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z); m.quaternion.set(pose.transform.orientation.x, pose.transform.orientation.y, pose.transform.orientation.z, pose.transform.orientation.w); this.el.setAttribute('visible','true'); } else { this.el.setAttribute('visible','false'); } }
   });
 
-  // Show entity only in VR (not AR)
-  AFRAME.registerComponent('vr-only',{
-    init(){ const s=this.el.sceneEl; const update=()=>{ this.el.setAttribute('visible', !s.is('ar-mode')); }; s.addEventListener('enter-vr', update); s.addEventListener('exit-vr', update); update(); }
-  }); if(!session) return;
-        session.requestReferenceSpace('viewer').then((s)=>{ this.viewerSpace=s; });
-        session.requestReferenceSpace('local-floor').then(rs=>{ this.refSpace=rs; });
-        session.requestHitTestSource({space:this.viewerSpace}).then(src=>{ this.hitTestSource=src; }); };
-      this.onEnd=()=>{ this.viewerSpace=null; if(this.hitTestSource){ this.hitTestSource.cancel && this.hitTestSource.cancel(); this.hitTestSource=null; } };
-      xr.addEventListener('sessionstart', this.onSession); xr.addEventListener('sessionend', this.onEnd);
-    },
-    tick(){ const xr=this.el.sceneEl.renderer.xr; const session=xr.getSession(); if(!session||!this.hitTestSource||!this.refSpace) { this.el.setAttribute('visible','false'); return; }
-      const frame=xr.getFrame(); const hits=frame.getHitTestResults(this.hitTestSource); if(hits && hits.length){ const pose=hits[0].getPose(this.refSpace); const m=this.el.object3D; m.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z); m.quaternion.set(pose.transform.orientation.x, pose.transform.orientation.y, pose.transform.orientation.z, pose.transform.orientation.w); this.el.setAttribute('visible','true'); } else { this.el.setAttribute('visible','false'); } }
-  });
-
   AFRAME.registerComponent('grabber',{
     init(){ this.grabbed=null; this.offset=new THREE.Matrix4(); this.tmpMat=new THREE.Matrix4();
       this.el.addEventListener('selectstart', ()=>this.tryGrab());
       this.el.addEventListener('selectend', ()=>this.release()); },
     raycastHit(){ const rc=this.el.components.raycaster; if(!rc||!rc.intersections.length) return null; return rc.intersections[0]?.object?.el || null; },
-    tryGrab(){ const hit=this.raycastHit(); if(!hit) return; if (hit.classList.contains('ui-btn')) { hit.emit('uiclick'); return; } if(!hit.classList.contains('interactive')) return;
+    tryGrab(){ const hit=this.raycastHit(); if(!hit) return; if(!hit.classList.contains('interactive')) return;
       this.grabbed=hit; const ctrl = this.el.object3D; const obj = hit.object3D; const invCtrl = new THREE.Matrix4().copy(ctrl.matrixWorld).invert(); this.offset.copy(invCtrl).multiply(obj.matrixWorld); },
     release(){ this.grabbed=null; },
     tick(){ if(!this.grabbed) return; const ctrl = this.el.object3D; this.tmpMat.copy(ctrl.matrixWorld).multiply(this.offset); this.tmpMat.decompose(this.grabbed.object3D.position, this.grabbed.object3D.quaternion, this.grabbed.object3D.scale); }
   });
 
-  AFRAME.registerComponent('ui-button',{
-    schema:{action:{type:'string'}},
-    init(){ this.el.addEventListener('uiclick', ()=> this.run()); },
-    run(){ const a=this.data.action; if(a==='scaleUp') setScale(Number(scaleSlider.value)+0.1); else if(a==='scaleDown') setScale(Number(scaleSlider.value)-0.1); else if(a==='place') placeOnReticle(); else if(a==='recenter') recenter(); }
+  // Show entity only in VR (not AR)
+  AFRAME.registerComponent('vr-only',{
+    init(){ const s=this.el.sceneEl; const update=()=>{ this.el.setAttribute('visible', !s.is('ar-mode')); }; s.addEventListener('enter-vr', update); s.addEventListener('exit-vr', update); update(); }
   });
 
-  // Desktop default
-  if (!qs && !$('#src').value) {
-    $('#src').value = 'https://modelviewer.dev/shared-assets/models/Astronaut.glb';
-    loadModel($('#src').value);
-  }
+  // Add teleport controls only when *not* in AR
+  AFRAME.registerComponent('teleport-vr',{
+    init(){ const s=this.el.sceneEl; const el=this.el; const setup=()=>{
+      const inAR = s.is('ar-mode');
+      if(!inAR){
+        // enable teleport to #ground with thumbstick
+        el.setAttribute('teleport-controls', 'button: thumbstick; collisionEntities: #ground');
+      } else {
+        el.removeAttribute('teleport-controls');
+      }
+    };
+    this._onEnter=()=>setup(); this._onExit=()=>setup();
+    s.addEventListener('enter-vr', this._onEnter); s.addEventListener('exit-vr', this._onExit);
+    setup();
+  });
+
+  // Kick off
+  fetchModelList().catch(()=> setStatus('Failed to load model list', true));
   </script>
 </body>
 </html>
