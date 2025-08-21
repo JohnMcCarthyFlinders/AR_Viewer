@@ -9,7 +9,7 @@
   <style>
     :root{--bg:#0b1020;--panel:#111827;--muted:#94a3b8;--accent:#38bdf8}
     html,body{height:100%;margin:0;background:var(--bg);color:#e5e7eb;font:16px/1.35 system-ui,Segoe UI,Roboto}
-    #hud{position:fixed;inset:0;pointer-events:none}
+    #hud{position:fixed;inset:0;pointer-events:none;z-index:9999} header, #status{pointer-events:auto} a-scene{position:relative;z-index:1} canvas.a-canvas{position:relative;z-index:0}
     header{pointer-events:auto;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.6rem;background:var(--panel);}
     input[type=url]{flex:1;min-width:320px;padding:.45rem .6rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb}
     button{pointer-events:auto;cursor:pointer;padding:.5rem .8rem;border-radius:.5rem;border:1px solid #233;background:#0d1326;color:#e5e7eb}
@@ -25,6 +25,8 @@
     <header>
       <input id="src" type="url" placeholder="models/your.glb or https://…/file.glb" />
       <button id="load">Load</button>
+      <button id="focus">Focus URL</button>
+      <button id="paste">Paste</button>
       <button id="enter" class="primary">Enter MR</button>
       <button id="place">Place on reticle</button>
       <button id="recenter">Recenter near me</button>
@@ -109,6 +111,8 @@
 
   // UI wiring
   $('#load').addEventListener('click', ()=> loadModel($('#src').value.trim()));
+  $('#focus').addEventListener('click', ()=> { const i=$('#src'); i.focus(); setStatus('URL box focused'); });
+  $('#paste').addEventListener('click', async ()=> { try{ const t=await navigator.clipboard.readText(); if(t){ $('#src').value=t; setStatus('Pasted from clipboard'); } else { setStatus('Clipboard empty', true);} } catch(e){ setStatus('Clipboard not available here', true);} });
   $('#enter').addEventListener('click', ()=> document.querySelector('a-scene').enterVR());
   $('#place').addEventListener('click', ()=> placeOnReticle());
   $('#recenter').addEventListener('click', ()=> recenter());
