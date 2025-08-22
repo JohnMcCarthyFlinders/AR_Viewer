@@ -4,16 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Quest MR GLB Viewer (stable)</title>
+  <!-- Pin to a stable version -->
   <script type="module" src="https://unpkg.com/@google/model-viewer@3.3.0/dist/model-viewer.min.js"></script>
   <style>
-    :root { --ui:#0f172a; --bg:#0b1020; --muted:#94a3b8; --accent:#38bdf8 }
-    html,body{height:100%;margin:0;background:var(--bg);color:#e5e7eb;font:16px/1.4 system-ui,Segoe UI,Roboto}
+    html,body{height:100%;margin:0;background:#0b1020;color:#e5e7eb;font:16px/1.4 system-ui,Segoe UI,Roboto}
     header{display:grid;gap:.5rem;grid-template-columns:1fr auto auto;align-items:center;
       padding:.75rem;background:rgba(15,23,42,.9);position:sticky;top:0;backdrop-filter:blur(6px);z-index:10}
     input[type=url]{width:100%;padding:.6rem .7rem;border-radius:.6rem;border:1px solid #233;background:#0d1326;color:#e5e7eb}
     button{cursor:pointer;padding:.6rem .9rem;margin-left:.5rem;border-radius:.6rem;border:1px solid #233;background:#0d1326;color:#e5e7eb;font-weight:600}
-    button.primary{background:var(--accent);color:#001421;border-color:#0ea5e9}
-    #status{padding:.5rem .75rem;color:var(--muted);font-size:.9rem}
+    button.primary{background:#38bdf8;color:#001421;border-color:#0ea5e9}
+    #status{padding:.5rem .75rem;color:#94a3b8;font-size:.9rem;min-height:1.4em}
     .error{color:#fecaca}
     model-viewer{width:100%;height:calc(100% - 90px);display:block;background:#0a0f1f}
   </style>
@@ -25,7 +25,7 @@
     <button id="enterAr" class="primary">Enter MR (passthrough)</button>
   </header>
 
-  <div id="status">Paste a GLB URL or use the default. (On Quest, press <em>Enter MR</em>.)</div>
+  <div id="status">Ready. Paste a GLB URL, click Load, then Enter MR.</div>
 
   <model-viewer id="mv"
     src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/DamagedHelmet/glTF-Binary/DamagedHelmet.glb"
@@ -40,6 +40,10 @@
     const loadBtn = document.getElementById('load');
     const enterBtn = document.getElementById('enterAr');
     const status = document.getElementById('status');
+
+    // Show errors instead of a white screen
+    window.addEventListener('error', e => { status.innerHTML = '<span class="error">JS error: '+(e.message||e.error)+'</span>'; });
+    window.addEventListener('unhandledrejection', e => { status.innerHTML = '<span class="error">Promise error: '+(e.reason?.message||e.reason)+'</span>'; });
 
     // Add ?v=timestamp for same-origin URLs to beat stale caches after renames
     function bust(raw) {
@@ -71,7 +75,7 @@
     enterBtn.addEventListener('click', async () => {
       try {
         if (!mv.canActivateAR) {
-          status.innerHTML = '<span class="error">AR not available (check Camera/XR permissions in the padlock menu).</span>';
+          status.innerHTML = '<span class="error">AR not available (padlock → allow Camera & XR).</span>';
           return;
         }
         await mv.activateAR();
