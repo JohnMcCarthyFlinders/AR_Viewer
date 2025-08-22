@@ -3,76 +3,82 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Quest MR GLB Viewer (WebXR)</title>
-  <!-- Model Viewer web component -->
-<script>
-  const mv = document.getElementById('mv');
-  const input = document.getElementById('src');
-  const loadBtn = document.getElementById('load');
-  const enterBtn = document.getElementById('enterAr');
-  const status = document.getElementById('status');
-  const support = document.getElementById('support');
+  <title>Quest MR GLB Viewer (stable)</title>
+  <script type="module" src="https://unpkg.com/@google/model-viewer@3.3.0/dist/model-viewer.min.js"></script>
+  <style>
+    :root { --ui:#0f172a; --bg:#0b1020; --muted:#94a3b8; --accent:#38bdf8 }
+    html,body{height:100%;margin:0;background:var(--bg);color:#e5e7eb;font:16px/1.4 system-ui,Segoe UI,Roboto}
+    header{display:grid;gap:.5rem;grid-template-columns:1fr auto auto;align-items:center;
+      padding:.75rem;background:rgba(15,23,42,.9);position:sticky;top:0;backdrop-filter:blur(6px);z-index:10}
+    input[type=url]{width:100%;padding:.6rem .7rem;border-radius:.6rem;border:1px solid #233;background:#0d1326;color:#e5e7eb}
+    button{cursor:pointer;padding:.6rem .9rem;margin-left:.5rem;border-radius:.6rem;border:1px solid #233;background:#0d1326;color:#e5e7eb;font-weight:600}
+    button.primary{background:var(--accent);color:#001421;border-color:#0ea5e9}
+    #status{padding:.5rem .75rem;color:var(--muted);font-size:.9rem}
+    .error{color:#fecaca}
+    model-viewer{width:100%;height:calc(100% - 90px);display:block;background:#0a0f1f}
+  </style>
+</head>
+<body>
+  <header>
+    <input id="src" type="url" placeholder="e.g. models/t.glb or https://…/file.glb" />
+    <button id="load">Load</button>
+    <button id="enterAr" class="primary">Enter MR (passthrough)</button>
+  </header>
 
-  // Helper: add ?v=<timestamp> for same-origin GLBs to defeat stale caches
-  const bust = (raw) => {
-    try {
-      const abs = new URL(raw, location.href);        // resolve relative like models/C.glb
-      if (abs.origin === location.origin) {
-        abs.searchParams.set('v', Date.now().toString());
-      }
-      return abs.href;
-    } catch { return raw; }
-  };
+  <div id="status">Paste a GLB URL or use the default. (On Quest, press <em>Enter MR</em>.)</div>
 
-  // Load from ?src=<...>
-  try {
-    const p = new URL(location.href).searchParams.get('src');
-    if (p) { mv.src = bust(p); input.value = p; status.textContent = 'Loading…'; }
-  } catch {}
+  <model-viewer id="mv"
+    src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/DamagedHelmet/glTF-Binary/DamagedHelmet.glb"
+    ar ar-modes="webxr" ar-scale="fixed" ar-placement="floor"
+    camera-controls touch-action="pan-y" crossorigin="anonymous">
+    <button slot="ar-button" style="display:none">AR</button>
+  </model-viewer>
 
-  // AR support indicator
-  const refreshSupport = () => {
-    const can = mv.canActivateAR;
-    support.textContent = `AR support: ${can ? 'available' : 'unavailable'} (mode: webxr)`;
-    enterBtn.disabled = !can;
-    enterBtn.title = can ? 'Enter passthrough' : 'AR not available in this browser or context';
-  };
+  <script>
+    const mv = document.getElementById('mv');
+    const input = document.getElementById('src');
+    const loadBtn = document.getElementById('load');
+    const enterBtn = document.getElementById('enterAr');
+    const status = document.getElementById('status');
 
-  mv.addEventListener('load', () => { status.textContent = `Loaded: ${mv.src}`; });
-  mv.addEventListener('error', (e) => {
-    status.innerHTML = `<span class="error">Error: ${e.detail?.message || 'failed to load model'}</span>`;
-  });
-  mv.addEventListener('ar-status', (e) => {
-    if (e.detail.status === 'failed') {
-      status.innerHTML = '<span class="error">AR failed to start. Ensure HTTPS and Quest Browser, then try again.</span>';
+    // Add ?v=timestamp for same-origin URLs to beat stale caches after renames
+    function bust(raw) {
+      try {
+        const abs = new URL(raw, location.href);
+        if (abs.origin === location.origin) abs.searchParams.set('v', Date.now().toString());
+        return abs.href;
+      } catch { return raw; }
     }
-  });
 
-  // Load button
-  loadBtn.addEventListener('click', async () => {
-    const raw = input.value.trim();
-    if (!raw) return;
-    const url = bust(raw);
-    mv.src = url;
-    status.textContent = 'Loading…';
-  });
-
-  // Enter AR
-  enterBtn.addEventListener('click', async () => {
+    // Load from ?src=
     try {
-      if (!mv.canActivateAR) {
-        status.innerHTML = '<span class="error">AR not available. Use Quest Browser over HTTPS.</span>';
-        return;
+      const p = new URL(location.href).searchParams.get('src');
+      if (p) { input.value = p; mv.src = bust(p); status.textContent = 'Loading…'; }
+    } catch {}
+
+    mv.addEventListener('load', () => status.textContent = `Loaded: ${mv.src}`);
+    mv.addEventListener('error', e => {
+      status.innerHTML = `<span class="error">Error: ${e?.detail?.message || 'failed to load model'}</span>`;
+      console.error('model-viewer error', e);
+    });
+
+    loadBtn.addEventListener('click', () => {
+      const raw = input.value.trim(); if (!raw) return;
+      mv.src = bust(raw);
+      status.textContent = 'Loading…';
+    });
+
+    enterBtn.addEventListener('click', async () => {
+      try {
+        if (!mv.canActivateAR) {
+          status.innerHTML = '<span class="error">AR not available (check Camera/XR permissions in the padlock menu).</span>';
+          return;
+        }
+        await mv.activateAR();
+      } catch (err) {
+        status.innerHTML = `<span class="error">AR error: ${err?.message || err}</span>`;
       }
-      await mv.activateAR();
-    } catch (err) {
-      status.innerHTML = `<span class="error">AR error: ${err?.message || err}</span>`;
-    }
-  });
-
-  refreshSupport();
-  setTimeout(refreshSupport, 1000);
-</script>
-
+    });
+  </script>
 </body>
 </html>
